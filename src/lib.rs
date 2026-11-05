@@ -25,9 +25,12 @@ mod plansim {
 
     #[pymodule_init]
     fn init(m: &Bound<'_, PyModule>) -> PyResult<()> {
+        // m.add_class::<super::OrbitalSolver>()?;
+        m.add_class::<super::OrbitalSolverResults>()?;
         seq!(N in 2..=10 {
             paste! {
                 m.add_class::<super::[<OrbitalSolver N>]>()?;
+                m.add_class::<super::[<OrbitalSolverResults N>]>()?;
             }
         });
         Ok(())
@@ -149,31 +152,161 @@ seq!(N in 2..=10 {
     pub struct [<OrbitalSolver N>] {
         inner: GenericSolver<N>,
     }
+    #[pyclass(extends=OrbitalSolverResults, subclass)]
+    pub struct [<OrbitalSolverResults N>] {
+        data: Vec<Vec<f64>>,
+        times: Vec<f64>,
+    }
     #[pymethods]
     impl [<OrbitalSolver N>] {
         #[new]
-        pub fn new(data: [f64; N]) -> Self {
+        pub fn new(masses: [f64; N]) -> Self {
             Self {
-                inner: GenericSolver::<N>::new(data),
+                inner: GenericSolver::<N>::new(masses),
             }
         }
 
         pub fn solve(
                 &mut self,
+                py: Python<'_>,
                 rs: [f64; N],
                 r_angs: [f64; N],
                 vs: [f64; N],
                 v_angs: [f64; N],
                 tspan: (f64, f64),
                 tpoints: Vec<f64>,
-            ) -> Result<Vec<Vec<f64>>, PyErr> {
+            ) -> Result<Py<[<OrbitalSolverResults N>]>, PyErr> {
                 self.inner.solve(rs, r_angs, vs, v_angs, tspan).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
-                self.inner
-    .results(&tpoints)
-    .ok_or_else(|| {
-        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("No results available")
-    })
+                let data = self.inner
+                .results(&tpoints)
+                .ok_or_else(|| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("No results available")
+                })?;
+                    Py::new(
+                        py,
+                        (
+                            [<OrbitalSolverResults N>]::new(data, tpoints),
+                            OrbitalSolverResults {},
+                        ),
+                    )
             }
+    }
+
+    impl [<OrbitalSolverResults N>] {
+        fn new(data: Vec<Vec<f64>>, times: Vec<f64>) -> Self {
+            assert_eq!(data.first().unwrap().len(), N*6);
+            Self { data, times }
+        }
+    }
+
+    #[pymethods]
+    impl [<OrbitalSolverResults N>] {
+        fn rows(&self) -> PyResult<&Vec<Vec<f64>>> {
+            Ok(&self.data)
+        }
+        fn cols(&self) -> PyResult<Vec<Vec<&f64>>> {
+            let mut cols: Vec<Vec<&f64>> = vec![Vec::new(); N*6];
+            for row in &self.data {
+                assert_eq!(row.len(), N*6);
+                for (j, val) in row.iter().enumerate() {
+                    cols[j].push(val);
+                }
+            }
+            Ok(cols)
+        }
+        fn get_x(&self, index: usize) -> PyResult<Vec<&f64>> {
+            if index >= N {
+                return Err(PyErr::new::<pyo3::exceptions::PyIndexError, _>("Index out of bounds"));
+            }
+            Ok(self.data.iter().map(|row| &row[index*6]).collect())
+        }
+        fn get_y(&self, index: usize) -> PyResult<Vec<&f64>> {
+            if index >= N {
+                return Err(PyErr::new::<pyo3::exceptions::PyIndexError, _>("Index out of bounds"));
+            }
+            Ok(self.data.iter().map(|row| &row[(index*6)+1]).collect())
+        }
+        fn get_z(&self, index: usize) -> PyResult<Vec<&f64>> {
+            if index >= N {
+                return Err(PyErr::new::<pyo3::exceptions::PyIndexError, _>("Index out of bounds"));
+            }
+            Ok(self.data.iter().map(|row| &row[(index*6)+2]).collect())
+        }
+        fn get_vx(&self, index: usize) -> PyResult<Vec<&f64>> {
+            if index >= N {
+                return Err(PyErr::new::<pyo3::exceptions::PyIndexError, _>("Index out of bounds"));
+            }
+            Ok(self.data.iter().map(|row| &row[(index*6)+3]).collect())
+        }
+        fn get_vy(&self, index: usize) -> PyResult<Vec<&f64>> {
+            if index >= N {
+                return Err(PyErr::new::<pyo3::exceptions::PyIndexError, _>("Index out of bounds"));
+            }
+            Ok(self.data.iter().map(|row| &row[(index*6)+4]).collect())
+        }
+        fn get_vz(&self, index: usize) -> PyResult<Vec<&f64>> {
+            if index >= N {
+                return Err(PyErr::new::<pyo3::exceptions::PyIndexError, _>("Index out of bounds"));
+            }
+            Ok(self.data.iter().map(|row| &row[(index*6)+5]).collect())
+        }
+        fn get_t(&self) -> PyResult<&Vec<f64>> {
+            Ok(&self.times)
+        }
     }
 }
 });
+
+#[pyclass(subclass)]
+pub struct OrbitalSolverResults {}
+
+#[pymethods]
+impl OrbitalSolverResults {
+    pub fn rows(&self) -> PyResult<&Vec<Vec<f64>>> {
+        Err(PyErr::new::<pyo3::exceptions::PyNotImplementedError, _>(
+            "rows() method not implemented",
+        ))
+    }
+
+    pub fn cols(&self) -> PyResult<Vec<Vec<&f64>>> {
+        Err(PyErr::new::<pyo3::exceptions::PyNotImplementedError, _>(
+            "cols() method not implemented",
+        ))
+    }
+
+    pub fn get_x(&self, index: usize) -> PyResult<Vec<f64>> {
+        Err(PyErr::new::<pyo3::exceptions::PyNotImplementedError, _>(
+            "get_x() method not implemented",
+        ))
+    }
+    pub fn get_y(&self, index: usize) -> PyResult<Vec<f64>> {
+        Err(PyErr::new::<pyo3::exceptions::PyNotImplementedError, _>(
+            "get_y() method not implemented",
+        ))
+    }
+    pub fn get_z(&self, index: usize) -> PyResult<Vec<f64>> {
+        Err(PyErr::new::<pyo3::exceptions::PyNotImplementedError, _>(
+            "get_z() method not implemented",
+        ))
+    }
+    pub fn get_vx(&self, index: usize) -> PyResult<Vec<f64>> {
+        Err(PyErr::new::<pyo3::exceptions::PyNotImplementedError, _>(
+            "get_vx() method not implemented",
+        ))
+    }
+    pub fn get_vy(&self, index: usize) -> PyResult<Vec<f64>> {
+        Err(PyErr::new::<pyo3::exceptions::PyNotImplementedError, _>(
+            "get_vy() method not implemented",
+        ))
+    }
+    pub fn get_vz(&self, index: usize) -> PyResult<Vec<f64>> {
+        Err(PyErr::new::<pyo3::exceptions::PyNotImplementedError, _>(
+            "get_vz() method not implemented",
+        ))
+    }
+    pub fn get_t(&self) -> PyResult<&Vec<f64>> {
+        Err(PyErr::new::<pyo3::exceptions::PyNotImplementedError, _>(
+            "get_t() method not implemented",
+        ))
+    }
+}
