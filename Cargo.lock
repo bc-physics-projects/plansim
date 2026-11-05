@@ -283,7 +283,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ode_solvers",
+ "paste",
  "pyo3",
+ "seq-macro",
 ]
 
 [[package]]
@@ -381,6 +383,12 @@ checksum = "96b02de82ddbe1b636e6170c21be622223aea188ef2e139be0a5b219ec215323"
 dependencies = [
  "bytemuck",
 ]
+
+[[package]]
+name = "seq-macro"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bc711410fbe7399f390ca1c3b60ad0f53f80e95c5eb935e52268a0e2cd49acc"
 
 [[package]]
 name = "serde"
