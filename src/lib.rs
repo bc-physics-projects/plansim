@@ -1,12 +1,10 @@
 #![feature(generic_const_exprs)]
 #![allow(incomplete_features)]
 
-use std::iter;
-
+use nalgebra::DVector;
+use ode_solvers::System;
 use ode_solvers::continuous_output_model::ContinuousOutputModel;
-use ode_solvers::dop_shared::SolverResult;
 use ode_solvers::dopri5::*;
-use ode_solvers::*;
 use paste::paste;
 use pyo3::prelude::*;
 use seq_macro::seq;
@@ -36,12 +34,39 @@ mod plansim {
     }
 }
 
+struct FlatNBodies<const N: usize>
+where
+    [(); N * 6]:,
+{
+    inner: system::NBodies<N>,
+}
+
+impl<const N: usize> System<f64, DVector<f64>> for FlatNBodies<N>
+where
+    [(); N * 6]:,
+{
+    fn system(&self, t: f64, y: &DVector<f64>, dy: &mut DVector<f64>) {
+        let state = system::State::<N>::from_column_slice(y.as_slice());
+        let mut derivative = system::State::<N>::zeros();
+
+        <system::NBodies<N> as System<f64, system::State<N>>>::system(
+            &self.inner,
+            t,
+            &state,
+            &mut derivative,
+        );
+
+        dy.as_mut_slice().copy_from_slice(derivative.as_slice());
+    }
+}
+
 struct GenericSolver<const N: usize>
 where
     [(); N * 6]:,
 {
     data: system::NBodies<N>,
-    stepper: Option<Dopri5<f64, system::State<N>, system::NBodies<N>>>,
+    stepper: Option<Dopri5<f64, DVector<f64>, FlatNBodies<N>>>,
+    output: Option<ContinuousOutputModel<f64, DVector<f64>>>,
 }
 
 impl<const N: usize> GenericSolver<N>
@@ -52,6 +77,7 @@ where
         Self {
             data: system::NBodies { Ms: masses },
             stepper: None,
+            output: None,
         }
     }
 
@@ -65,18 +91,20 @@ where
     ) -> anyhow::Result<()> {
         let mut accum_vec: Vec<f64> = Vec::from([0.0; N * 6]);
         for i in 0..N {
-            accum_vec[i] = rs[i] * r_angs[i].cos();
-            accum_vec[i + 1] = rs[i] * r_angs[i].sin();
-            accum_vec[i + 2] = 0.0;
-            accum_vec[i + 3] = vs[i] * v_angs[i].cos();
-            accum_vec[i + 4] = vs[i] * v_angs[i].sin();
-            accum_vec[i + 5] = 0.0;
+            let base = i * 6;
+            accum_vec[base] = rs[i] * r_angs[i].cos();
+            accum_vec[base + 1] = rs[i] * r_angs[i].sin();
+            accum_vec[base + 2] = 0.0;
+            accum_vec[base + 3] = vs[i] * v_angs[i].cos();
+            accum_vec[base + 4] = vs[i] * v_angs[i].sin();
+            accum_vec[base + 5] = 0.0;
         }
-        let y0 = system::State::<N>::from_row_slice(&accum_vec);
+        let y0 = DVector::from_vec(accum_vec);
 
-        // Create a stepper and run the integration.
         let mut stepper = Dopri5::new(
-            self.data.clone(),
+            FlatNBodies {
+                inner: self.data.clone(),
+            },
             tspan.0,
             tspan.1,
             60.0,
@@ -84,16 +112,34 @@ where
             1.0e-10,
             1.0e-10,
         );
-        if stepper.integrate()?.accepted_steps > 0 {
+
+        let mut continuous_output_model = ContinuousOutputModel::default();
+        let res = stepper
+            .integrate_with_continuous_output_model(&mut continuous_output_model)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+        if res.accepted_steps > 0 {
             self.stepper = Some(stepper);
+            self.output = Some(continuous_output_model);
             Ok(())
         } else {
             Err(anyhow::anyhow!("Integration failed"))
         }
     }
 
-    pub fn results(&self) -> Option<(&Vec<f64>, &Vec<system::State<N>>)> {
-        self.stepper.as_ref().map(|stepper| stepper.results().get())
+    pub fn results(&self, ts: &[f64]) -> Option<Vec<Vec<f64>>> {
+        self.output.as_ref().map(|out| {
+            ts.iter()
+                .map(|&t| {
+                    out.evaluate(t)
+                        .as_slice()
+                        .to_vec()
+                        .into_iter()
+                        .map(|x| x.as_slice().to_vec())
+                })
+                .flatten()
+                .collect()
+        })
     }
 }
 
@@ -122,16 +168,11 @@ seq!(N in 2..=10 {
                 tpoints: Vec<f64>,
             ) -> Result<Vec<Vec<f64>>, PyErr> {
                 self.inner.solve(rs, r_angs, vs, v_angs, tspan).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
-                let (vec1, vec2) = self.inner.results().ok_or(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("No results available"))?;
-                let mut continuous_output_model = ContinuousOutputModel::default();
-                let stepper = self.inner.stepper.as_ref().ok_or(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("No stepper available"))?;
-                let res = stepper.integrate_with_continuous_output_model(&mut continuous_output_model).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
-                continuous_output_model.evaluate(1.2);
-
-                Ok(tpoints.iter().map(|&t| {
-                    let state = continuous_output_model.evaluate(t);
-                    state.as_slice().to_vec()
-                }).collect())
+                self.inner
+    .results(&tpoints)
+    .ok_or_else(|| {
+        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("No results available")
+    })
             }
     }
 }

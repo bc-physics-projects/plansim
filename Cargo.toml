@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow = "1.0.104"
+nalgebra = "0.34.2"
 ode_solvers = "0.6.2"
 paste = "1.0.15"
 pyo3 = "0.29.0"
