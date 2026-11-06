@@ -41,9 +41,9 @@ macro_rules! define_solvers {
                         vs: [f64; N],
                         v_angs: [f64; N],
                         tspan: (f64, f64),
-                        // tpoints: Vec<f64>,
+                        tspace: f64,
                     ) -> Result<Py<[<OrbitalSolverResults N>]>, PyErr> {
-                        self.inner.solve(rs, r_angs, vs, v_angs, tspan).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+                        self.inner.solve(rs, r_angs, vs, v_angs, tspan, tspace).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
                         let (tpoints, data) = self.inner
                         .results()
                         .ok_or_else(|| {
@@ -210,6 +210,7 @@ where
         vs: [f64; N],
         v_angs: [f64; N],
         tspan: (f64, f64),
+        tspace: f64,
     ) -> anyhow::Result<()> {
         let mut accum_vec: Vec<f64> = Vec::from([0.0; N * 6]);
         for i in 0..N {
@@ -229,7 +230,7 @@ where
             },
             tspan.0,
             tspan.1,
-            60.0,
+            tspace,
             y0,
             1.0e-10,
             1.0e-10,
