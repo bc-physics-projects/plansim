@@ -31,6 +31,7 @@ from math import atan2, cos, fsum, hypot, isfinite, radians, sin, sqrt
 AU = 149_597_870_700.0
 DAY = 86_400.0
 
+
 @dataclass(frozen=True)
 class Body:
     name: str
@@ -107,17 +108,42 @@ def plot_planets(result):
     """Display every sampled position of the Sun, planets, and moons in x/y."""
     import matplotlib.pyplot as plt
 
+    cx = cy = 0.0
+
+    for i, body in enumerate(BODIES):
+        state = result[str(i)]
+        x = state.struct.field("x").to_numpy() / AU
+        y = state.struct.field("y").to_numpy() / AU
+        mu = body.mu
+        cx += mu * x
+        cy += mu * y
+    cx /= fsum(body.mu for body in BODIES)
+    cy /= fsum(body.mu for body in BODIES)
+
+    print(cx.max(), cx.min(), cy.max(), cy.min())
+
     fig, ax = plt.subplots(figsize=(10, 8), layout="constrained")
     colors = plt.get_cmap("tab20").colors
     for i, body in enumerate(BODIES):
         state = result[str(i)]
         x = state.struct.field("x").to_numpy() / AU
         y = state.struct.field("y").to_numpy() / AU
-        ax.plot(x, y, linestyle="None", marker=".", markersize=2,
-                color=colors[i], label=body.name, rasterized=True)
+        ax.plot(
+            x - cx,
+            y - cy,
+            linestyle="None",
+            marker=".",
+            markersize=2,
+            color=colors[i],
+            label=body.name,
+            rasterized=True,
+        )
 
-    ax.set(xlabel="Barycentric x [AU]", ylabel="Barycentric y [AU]",
-           title=f"Sun, planet, and moon positions over {result['t'][-1] / DAY:g} days")
+    ax.set(
+        xlabel="Barycentric x [AU]",
+        ylabel="Barycentric y [AU]",
+        title=f"Sun, planet, and moon positions over {result['t'][-1] / DAY:g} days",
+    )
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, alpha=0.25)
     ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), markerscale=4)
@@ -129,7 +155,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days", type=float, default=30.0)
     parser.add_argument(
-        "--tspace", type=float, default=1.0,
+        "--tspace",
+        type=float,
+        default=1.0,
         help="Time between samples in seconds (default: 1)",
     )
     parser.add_argument(
@@ -156,6 +184,7 @@ def main():
         return
 
     import polars as pl
+
     import plansim
 
     if not hasattr(plansim, "OrbitalSolver15"):
@@ -176,9 +205,10 @@ def main():
     # Unpack only the final sample for display; preserve the nested return value.
     final_states = pl.concat(
         [
-            result[str(i)].tail(1).struct.unnest().with_columns(
-                pl.lit(i).alias("mass #"), pl.lit(body.name).alias("body")
-            )
+            result[str(i)]
+            .tail(1)
+            .struct.unnest()
+            .with_columns(pl.lit(i).alias("mass #"), pl.lit(body.name).alias("body"))
             for i, body in enumerate(BODIES)
         ]
     ).select("mass #", "body", "x", "y", "z", "vx", "vy", "vz")
