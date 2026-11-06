@@ -14,7 +14,8 @@ https://ssd.jpl.nasa.gov/sats/elem/  (moon orbital scales)
 The solver returns a Polars DataFrame: t is time in seconds, and columns
 "0" through "14" follow BODIES order. Each body column contains the Struct
 fields x, y, z, vx, vy, vz. For example, result["5"].struct.field("x")
-gives Earth's x coordinates. main() returns this nested DataFrame.
+gives Earth's x coordinates. main() displays all bodies' sampled x/y positions
+in astronomical units, then returns this nested DataFrame when the plot closes.
 
 Usage after rebuilding/installing plansim:
     python solar_system_15.py --days 30
@@ -102,6 +103,28 @@ def initial_conditions():
     return mus, rs, r_angs, vs, v_angs, radial_vs
 
 
+def plot_planets(result):
+    """Display every sampled position of the Sun, planets, and moons in x/y."""
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(10, 8), layout="constrained")
+    colors = plt.get_cmap("tab20").colors
+    for i, body in enumerate(BODIES):
+        state = result[str(i)]
+        x = state.struct.field("x").to_numpy() / AU
+        y = state.struct.field("y").to_numpy() / AU
+        ax.plot(x, y, linestyle="None", marker=".", markersize=2,
+                color=colors[i], label=body.name, rasterized=True)
+
+    ax.set(xlabel="Barycentric x [AU]", ylabel="Barycentric y [AU]",
+           title=f"Sun, planet, and moon positions over {result['t'][-1] / DAY:g} days")
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), markerscale=4)
+    plt.show()
+    return fig
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days", type=float, default=30.0)
@@ -162,6 +185,7 @@ def main():
     print("Final barycentric states (positions in m, velocities in m/s):")
     with pl.Config(tbl_rows=len(BODIES), tbl_cols=8, tbl_formatting="ASCII_FULL"):
         print(final_states)
+    plot_planets(result)
     return result
 
 

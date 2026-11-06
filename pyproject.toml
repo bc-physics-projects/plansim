@@ -10,7 +10,7 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = ["polars>=1.0", "numpy>=1.24"]
+dependencies = ["polars>=1.0", "numpy>=1.24", "matplotlib>=3.7"]
 dynamic = ["version"]
 
 [tool.maturin]
