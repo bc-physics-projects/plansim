@@ -28,6 +28,9 @@ import time
 from dataclasses import dataclass
 from math import atan2, cos, fsum, hypot, isfinite, radians, sin, sqrt
 
+import numpy as np
+from ellipse import LsqEllipse
+
 AU = 149_597_870_700.0
 DAY = 86_400.0
 
@@ -104,7 +107,16 @@ def initial_conditions():
     return mus, rs, r_angs, vs, v_angs, radial_vs
 
 
-def plot_planets(result):
+def ellipse(x, y, A, B):
+    """Return the ellipse equation value for a point (x, y) in AU."""
+    # Use the Sun's position as the origin; the Sun is at (0, 0) in this model.
+    # The semi-major axis is the average distance of the planet from the Sun.
+    # The semi-minor axis is calculated based on the eccentricity of the orbit.
+    # For simplicity, we assume circular orbits (eccentricity = 0), so a = b.
+    return x**2 + y**2
+
+
+def plot_points(result):
     """Display every sampled position of the Sun, planets, and moons in x/y."""
     import matplotlib.pyplot as plt
 
@@ -147,6 +159,61 @@ def plot_planets(result):
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, alpha=0.25)
     ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), markerscale=4)
+    plt.show()
+    return fig
+
+
+def plot_ellipses(result):
+    """Plot fitted planetary ellipses and print their least-squares errors."""
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(10, 8), layout="constrained")
+    colors = plt.get_cmap("tab20").colors
+
+    print("Planet ellipse fit errors (normalized ellipse-equation residuals):")
+    print(f"{'Planet':<10} {'MSE':>14} {'RMSE':>14}")
+
+    # BODIES[1:9] are the eight planets; omit the Sun and moons.
+    for i, body in enumerate(BODIES[1:9], start=1):
+        state = result[str(i)]
+        x = state.struct.field("x").to_numpy() / AU
+        y = state.struct.field("y").to_numpy() / AU
+
+        ellipse_fit = LsqEllipse().fit(np.array([x, y]).T)
+        (xc, yc), a, b, theta = ellipse_fit.as_parameters()
+
+        # Evaluate the fitted ellipse equation at each sampled position.
+        dx = x - xc
+        dy = y - yc
+        cos_theta = np.cos(theta)
+        sin_theta = np.sin(theta)
+        x_rot = dx * cos_theta + dy * sin_theta
+        y_rot = -dx * sin_theta + dy * cos_theta
+        residuals = (x_rot / a) ** 2 + (y_rot / b) ** 2 - 1
+        mse = float(np.mean(residuals**2))
+        rmse = sqrt(mse)
+        print(f"{body.name:<10} {mse:14.6e} {rmse:14.6e}")
+
+        t = np.linspace(0, 2 * np.pi, 100)
+        ellipse_x = xc + a * np.cos(t) * cos_theta - b * np.sin(t) * sin_theta
+        ellipse_y = yc + a * np.cos(t) * sin_theta + b * np.sin(t) * cos_theta
+        ax.plot(
+            ellipse_x,
+            ellipse_y,
+            linestyle="-",
+            color=colors[i],
+            label=f"{body.name} fit",
+            alpha=0.7,
+        )
+
+    ax.set(
+        xlabel="Barycentric x [AU]",
+        ylabel="Barycentric y [AU]",
+        title=f"Fitted planetary ellipses over {result['t'][-1] / DAY:g} days",
+    )
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1))
     plt.show()
     return fig
 
@@ -215,7 +282,8 @@ def main():
     print("Final barycentric states (positions in m, velocities in m/s):")
     with pl.Config(tbl_rows=len(BODIES), tbl_cols=8, tbl_formatting="ASCII_FULL"):
         print(final_states)
-    plot_planets(result)
+    # plot_points(result)
+    plot_ellipses(result)
     return result
 
 
