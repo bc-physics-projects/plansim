@@ -2,7 +2,7 @@
 #![allow(incomplete_features)]
 
 use nalgebra::DVector;
-use ode_solvers::System;
+use ode_solvers::{OutputType, System};
 use ode_solvers::continuous_output_model::ContinuousOutputModel;
 use ode_solvers::dop853::*;
 use paste::paste;
@@ -224,7 +224,7 @@ where
         }
         let y0 = DVector::from_vec(accum_vec);
 
-        let mut stepper = Dop853::new(
+        let mut stepper = Dop853::from_param(
             FlatNBodies {
                 inner: self.data.clone(),
             },
@@ -234,6 +234,15 @@ where
             y0,
             1.0e-10,
             1.0e-10,
+            0.9,               // safety_factor
+            0.0,               // beta
+            0.333,             // fac_min
+            6.0,               // fac_max
+            tspan.1 - tspan.0,  // h_max
+            0.0,               // h (automatic initial step size)
+            u32::MAX,          // n_max
+            1000,              // n_stiff
+            OutputType::Dense,
         );
 
         // let mut continuous_output_model = ContinuousOutputModel::default();
