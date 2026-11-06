@@ -12,10 +12,8 @@ crate-type = ["cdylib"]
 anyhow = "1.0.104"
 differential-equations = { version = "0.7.0", features = [
     "nalgebra",
-    "polars",
 ] }
 nalgebra = "0.35.0"
-polars = "0.34.0"
 paste = "1.0.15"
 pyo3 = "0.29.0"
 seq-macro = "0.3.6"

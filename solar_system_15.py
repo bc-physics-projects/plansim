@@ -11,6 +11,11 @@ https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/gm_de440.tpc
 https://ssd.jpl.nasa.gov/planets/approx_pos.html  (orbital scales)
 https://ssd.jpl.nasa.gov/sats/elem/  (moon orbital scales)
 
+The solver returns a Polars DataFrame: t is time in seconds, and columns
+"0" through "14" follow BODIES order. Each body column contains the Struct
+fields x, y, z, vx, vy, vz. For example, result["5"].struct.field("x")
+gives Earth's x coordinates. main() returns this nested DataFrame.
+
 Usage after rebuilding/installing plansim:
     python solar_system_15.py --days 30
     python solar_system_15.py --days 30 --tspace 60
@@ -127,6 +132,7 @@ def main():
     if args.initial_only:
         return
 
+    import polars as pl
     import plansim
 
     if not hasattr(plansim, "OrbitalSolver15"):
@@ -137,11 +143,25 @@ def main():
     start = time.perf_counter()
     result = solver.solve(rs, r_angs, vs, v_angs, (0.0, args.days * DAY), args.tspace)
     elapsed = time.perf_counter() - start
-    times = result.get_t()
+    if not isinstance(result, pl.DataFrame):
+        raise SystemExit("Rebuild/install plansim for the Polars DataFrame API.")
+    times = result["t"]
     print(
-        f"Solved {len(BODIES)} bodies: {len(times)} samples, final time {times[-1] / DAY:g} days."
+        f"Solved {len(BODIES)} bodies: {result.height} samples, final time {times[-1] / DAY:g} days."
     )
     print(f"Solver call time: {elapsed:.3f} seconds.")
+    # Unpack only the final sample for display; preserve the nested return value.
+    final_states = pl.concat(
+        [
+            result[str(i)].tail(1).struct.unnest().with_columns(
+                pl.lit(i).alias("mass #"), pl.lit(body.name).alias("body")
+            )
+            for i, body in enumerate(BODIES)
+        ]
+    ).select("mass #", "body", "x", "y", "z", "vx", "vy", "vz")
+    print("Final barycentric states (positions in m, velocities in m/s):")
+    with pl.Config(tbl_rows=len(BODIES), tbl_cols=8, tbl_formatting="ASCII_FULL"):
+        print(final_states)
     return result
 
 
