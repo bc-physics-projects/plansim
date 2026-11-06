@@ -2,7 +2,7 @@ use differential_equations::prelude::*;
 use nalgebra::DVector;
 use paste::paste;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyBytes, PyDict};
 use seq_macro::seq;
 mod system;
 
@@ -27,6 +27,7 @@ macro_rules! define_solvers {
                 /// Return a Polars DataFrame with time column `t` and zero-based body
                 /// columns `"0"`, `"1"`, ... containing x/y/z/vx/vy/vz Struct fields.
                 /// Access a component with df["0"].struct.field("x").
+                #[allow(clippy::too_many_arguments)] // Preserve the public Python API.
                 pub fn solve(
                         &mut self,
                         py: Python<'_>,
@@ -37,7 +38,7 @@ macro_rules! define_solvers {
                         tspan: (f64, f64),
                         tspace: f64,
                     ) -> PyResult<Py<PyAny>> {
-                        let (tpoints, data) = self.inner.solve(rs, r_angs, vs, v_angs, tspan, tspace)
+                        let (tpoints, data) = py.detach(|| self.inner.solve(rs, r_angs, vs, v_angs, tspan, tspace))
                             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
                         results_dataframe::<N>(py, tpoints, data)
                     }
@@ -93,19 +94,25 @@ impl<const N: usize> GenericSolver<N> {
         v_angs: [f64; N],
         tspan: (f64, f64),
         tspace: f64,
-    ) -> anyhow::Result<(Vec<f64>, Vec<Vec<f64>>)> {
+    ) -> anyhow::Result<(Vec<f64>, Vec<DVector<f64>>)> {
         anyhow::ensure!(
             tspace.is_finite() && tspace > 0.0,
             "tspace must be finite and positive"
         );
+        anyhow::ensure!(
+            tspan.0.is_finite() && tspan.1.is_finite() && tspan.1 > tspan.0,
+            "tspan must contain finite, increasing times"
+        );
         let mut accum_vec = vec![0.0; N * 6];
         for i in 0..N {
             let base = i * 6;
-            accum_vec[base] = rs[i] * r_angs[i].cos();
-            accum_vec[base + 1] = rs[i] * r_angs[i].sin();
+            let (rsin, rcos) = r_angs[i].sin_cos();
+            let (vsin, vcos) = v_angs[i].sin_cos();
+            accum_vec[base] = rs[i] * rcos;
+            accum_vec[base + 1] = rs[i] * rsin;
             accum_vec[base + 2] = 0.0;
-            accum_vec[base + 3] = vs[i] * v_angs[i].cos();
-            accum_vec[base + 4] = vs[i] * v_angs[i].sin();
+            accum_vec[base + 3] = vs[i] * vcos;
+            accum_vec[base + 4] = vs[i] * vsin;
             accum_vec[base + 5] = 0.0;
         }
         let y0 = DVector::from_vec(accum_vec);
@@ -119,14 +126,7 @@ impl<const N: usize> GenericSolver<N> {
             .method(stepper)
             .even(tspace)
             .solve()?;
-        Ok((
-            solution.t,
-            solution
-                .y
-                .into_iter()
-                .map(|state| state.as_slice().to_vec())
-                .collect(),
-        ))
+        Ok((solution.t, solution.y))
     }
 }
 
@@ -134,11 +134,12 @@ impl<const N: usize> GenericSolver<N> {
 fn results_dataframe<const N: usize>(
     py: Python<'_>,
     times: Vec<f64>,
-    data: Vec<Vec<f64>>,
+    data: Vec<DVector<f64>>,
 ) -> PyResult<Py<PyAny>> {
     let polars = py.import("polars")?;
     let dataframe = polars.getattr("DataFrame")?;
     let series = polars.getattr("Series")?;
+    let frombuffer = py.import("numpy")?.getattr("frombuffer")?;
     let kwargs = PyDict::new(py);
     kwargs.set_item("dtype", polars.getattr("Float64")?)?;
     let columns = PyDict::new(py);
@@ -146,7 +147,15 @@ fn results_dataframe<const N: usize>(
     for body in 0..N {
         let fields = PyDict::new(py);
         for (component, name) in ["x", "y", "z", "vx", "vy", "vz"].iter().enumerate() {
-            let values: Vec<f64> = data.iter().map(|row| row[body * 6 + component]).collect();
+            // Write directly into a Python-owned buffer: no per-sample Python floats.
+            // NumPy retains the bytes owner; Polars retains/copies the array as needed.
+            let bytes = PyBytes::new_with(py, data.len() * 8, |buffer| {
+                for (row, chunk) in data.iter().zip(buffer.as_chunks_mut::<8>().0) {
+                    chunk.copy_from_slice(&row[body * 6 + component].to_ne_bytes());
+                }
+                Ok(())
+            })?;
+            let values = frombuffer.call1((bytes, "float64"))?;
             fields.set_item(*name, series.call((*name, values), Some(&kwargs))?)?;
         }
         let name = body.to_string();

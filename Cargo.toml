@@ -23,4 +23,10 @@ panic = "abort"
 lto = "fat"
 codegen-units = 1
 strip = true
-opt-level = "z"
+opt-level = 3
+
+# Keep symbols when investigating native CPU profiles.
+[profile.profiling]
+inherits = "release"
+debug = 1
+strip = false

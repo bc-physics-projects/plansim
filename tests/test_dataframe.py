@@ -4,9 +4,33 @@ import unittest
 
 import polars as pl
 import plansim
+from solar_system_15 import DAY, initial_conditions
 
 
 class DataFrameResultsTests(unittest.TestCase):
+    def test_solar_daily_and_second_sampling_agree(self):
+        mus, rs, angles, vs, velocity_angles, _ = initial_conditions()
+        solver = plansim.OrbitalSolver15(mus)
+        daily = solver.solve(rs, angles, vs, velocity_angles, (0.0, DAY), DAY)
+        seconds = solver.solve(rs, angles, vs, velocity_angles, (0.0, DAY), 1.0)
+        self.assertEqual(daily.height, 2)
+        self.assertEqual(seconds.height, 86401)
+        self.assertEqual(seconds["t"].diff().drop_nulls().unique().to_list(), [1.0])
+        for body in range(15):
+            for field in ("x", "y", "z", "vx", "vy", "vz"):
+                a = daily[str(body)].struct.field(field)
+                b = seconds[str(body)].struct.field(field)
+                self.assertTrue(b.is_finite().all())
+                self.assertAlmostEqual(a[-1], b[-1], delta=max(1e-8 * abs(a[-1]), 1e-6))
+                self.assertEqual(a[0], b[0])
+
+    def test_invalid_time_arguments(self):
+        solver = plansim.OrbitalSolver15([0.0] * 15)
+        arrays = ([float(i + 1) for i in range(15)], [0.0] * 15, [0.0] * 15, [0.0] * 15)
+        for span, spacing in (((0., 1.), 0.), ((1., 0.), 1.), ((0., float("inf")), 1.)):
+            with self.subTest(span=span, spacing=spacing), self.assertRaises(RuntimeError):
+                solver.solve(*arrays, span, spacing)
+
     def test_nested_state_and_sample_times(self):
         # With zero gravity, separated bodies move at constant velocity.
         for count in (15, 90, 100):
