@@ -1,10 +1,5 @@
-#![feature(generic_const_exprs)]
-#![allow(incomplete_features)]
-
+use differential_equations::prelude::*;
 use nalgebra::DVector;
-use ode_solvers::{OutputType, System};
-use ode_solvers::continuous_output_model::ContinuousOutputModel;
-use ode_solvers::dop853::*;
 use paste::paste;
 use pyo3::prelude::*;
 use seq_macro::seq;
@@ -43,12 +38,8 @@ macro_rules! define_solvers {
                         tspan: (f64, f64),
                         tspace: f64,
                     ) -> Result<Py<[<OrbitalSolverResults N>]>, PyErr> {
-                        self.inner.solve(rs, r_angs, vs, v_angs, tspan, tspace).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
-                        let (tpoints, data) = self.inner
-                        .results()
-                        .ok_or_else(|| {
-                            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("No results available")
-                        })?;
+                        let (tpoints, data) = self.inner.solve(rs, r_angs, vs, v_angs, tspan, tspace)
+                            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
                             Py::new(
                                 py,
                                 (
@@ -156,50 +147,14 @@ macro_rules! define_solvers {
 
 define_solvers!((15, 15), (90, 100));
 
-struct FlatNBodies<const N: usize>
-where
-    [(); N * 6]:,
-{
-    inner: system::NBodies<N>,
-}
-
-impl<const N: usize> System<f64, DVector<f64>> for FlatNBodies<N>
-where
-    [(); N * 6]:,
-{
-    fn system(&self, t: f64, y: &DVector<f64>, dy: &mut DVector<f64>) {
-        let state = system::State::<N>::from_column_slice(y.as_slice());
-        let mut derivative = system::State::<N>::zeros();
-
-        <system::NBodies<N> as System<f64, system::State<N>>>::system(
-            &self.inner,
-            t,
-            &state,
-            &mut derivative,
-        );
-
-        dy.as_mut_slice().copy_from_slice(derivative.as_slice());
-    }
-}
-
-struct GenericSolver<const N: usize>
-where
-    [(); N * 6]:,
-{
+struct GenericSolver<const N: usize> {
     data: system::NBodies<N>,
-    stepper: Option<Dop853<f64, DVector<f64>, FlatNBodies<N>>>,
-    output: Option<ContinuousOutputModel<f64, DVector<f64>>>,
 }
 
-impl<const N: usize> GenericSolver<N>
-where
-    [(); N * 6]:,
-{
+impl<const N: usize> GenericSolver<N> {
     pub fn new(mus: [f64; N]) -> Self {
         Self {
-            data: system::NBodies { mus: mus },
-            stepper: None,
-            output: None,
+            data: system::NBodies { mus },
         }
     }
 
@@ -211,8 +166,12 @@ where
         v_angs: [f64; N],
         tspan: (f64, f64),
         tspace: f64,
-    ) -> anyhow::Result<()> {
-        let mut accum_vec: Vec<f64> = Vec::from([0.0; N * 6]);
+    ) -> anyhow::Result<(Vec<f64>, Vec<Vec<f64>>)> {
+        anyhow::ensure!(
+            tspace.is_finite() && tspace > 0.0,
+            "tspace must be finite and positive"
+        );
+        let mut accum_vec = vec![0.0; N * 6];
         for i in 0..N {
             let base = i * 6;
             accum_vec[base] = rs[i] * r_angs[i].cos();
@@ -224,48 +183,23 @@ where
         }
         let y0 = DVector::from_vec(accum_vec);
 
-        let mut stepper = Dop853::from_param(
-            FlatNBodies {
-                inner: self.data.clone(),
-            },
-            tspan.0,
-            tspan.1,
-            tspace,
-            y0,
-            1.0e-10,
-            1.0e-10,
-            0.9,               // safety_factor
-            0.0,               // beta
-            0.333,             // fac_min
-            6.0,               // fac_max
-            tspan.1 - tspan.0,  // h_max
-            0.0,               // h (automatic initial step size)
-            u32::MAX,          // n_max
-            1000,              // n_stiff
-            OutputType::Dense,
-        );
-
-        // let mut continuous_output_model = ContinuousOutputModel::default();
-        // let res = stepper
-        //     .integrate_with_continuous_output_model(&mut continuous_output_model)
-        //     .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
-        let res = stepper.integrate()?;
-        if res.accepted_steps > 0 {
-            self.stepper = Some(stepper);
-            // self.output = Some(continuous_output_model);
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!("Integration failed"))
-        }
-    }
-
-    pub fn results(&self) -> Option<(Vec<f64>, Vec<Vec<f64>>)> {
-        self.stepper.as_ref().map(|stepper| {
-            let y = stepper.results();
-            let (ts, states) = y.get();
-            let x: Vec<Vec<f64>> = states.iter().map(|s| s.as_slice().to_vec()).collect();
-            (ts.to_vec(), x)
-        })
+        let stepper = ExplicitRungeKutta::dop853()
+            .rtol(1e-8)
+            .atol(1e-6)
+            .max_steps(usize::MAX);
+        let system = system::NBodies::<N> { mus: self.data.mus };
+        let solution = IVP::ode(&system, tspan.0, tspan.1, y0)
+            .method(stepper)
+            .even(tspace)
+            .solve()?;
+        Ok((
+            solution.t,
+            solution
+                .y
+                .into_iter()
+                .map(|state| state.as_slice().to_vec())
+                .collect(),
+        ))
     }
 }
 
