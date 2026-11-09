@@ -163,6 +163,35 @@ def plot_points(result):
     return fig
 
 
+def fit_ellipse_parameters(x, y):
+    """Fit in centered, scaled coordinates to reduce numerical cancellation."""
+    points = np.column_stack((x, y))
+    if len(points) < 5 or not np.isfinite(points).all():
+        raise ValueError("At least five finite samples are needed")
+    origin = points.mean(axis=0)
+    centered = points - origin
+    _, scales, rotation = np.linalg.svd(centered, full_matrices=False)
+    if scales[-1] <= scales[0] * 1e-12:
+        raise ValueError("Samples are coincident or nearly collinear")
+    scales /= sqrt(len(points))
+    transform = rotation.T @ np.diag(scales)
+    fitted = LsqEllipse().fit((centered @ rotation.T) / scales)
+    center, a, b, theta = fitted.as_parameters()
+    parameters = np.real_if_close(np.array([*center, a, b, theta]))
+    if np.iscomplexobj(parameters) or not np.isfinite(parameters).all():
+        raise ValueError("No finite ellipse fit")
+    center, a, b, theta = parameters[:2], *parameters[2:]
+    if min(a, b) <= 0:
+        raise ValueError("Ellipse axes must be positive")
+    center = transform @ center + origin
+    ct, st = np.cos(theta), np.sin(theta)
+    axes = transform @ np.array([[ct, -st], [st, ct]]) @ np.diag([a, b])
+    directions, lengths, _ = np.linalg.svd(axes)
+    a, b = lengths
+    theta = np.arctan2(directions[1, 0], directions[0, 0])
+    return center, a, b, theta
+
+
 def plot_ellipses(result):
     """Plot fitted planetary ellipses and print their least-squares errors."""
     import matplotlib.pyplot as plt
@@ -179,8 +208,11 @@ def plot_ellipses(result):
         x = state.struct.field("x").to_numpy() / AU
         y = state.struct.field("y").to_numpy() / AU
 
-        ellipse_fit = LsqEllipse().fit(np.array([x, y]).T)
-        (xc, yc), a, b, theta = ellipse_fit.as_parameters()
+        try:
+            (xc, yc), a, b, theta = fit_ellipse_parameters(x, y)
+        except (ValueError, IndexError, np.linalg.LinAlgError) as exc:
+            print(f"{body.name:<10} Fit unavailable: {exc}")
+            continue
 
         # Evaluate the fitted ellipse equation at each sampled position.
         dx = x - xc
@@ -214,6 +246,41 @@ def plot_ellipses(result):
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, alpha=0.25)
     ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1))
+    plt.show()
+    return fig
+
+
+def fitplot(result):
+    """Compare each planet's raw barycentric samples with its fitted ellipse."""
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(2, 4, figsize=(18, 9), layout="constrained")
+    colors = plt.get_cmap("tab20").colors
+    phase = np.linspace(0, 2 * np.pi, 500)
+    for i, (body, ax) in enumerate(zip(BODIES[1:9], axes.flat), start=1):
+        state = result[str(i)]
+        x = state.struct.field("x").to_numpy() / AU
+        y = state.struct.field("y").to_numpy() / AU
+        ax.plot(x, y, linestyle="None", marker=".", markersize=3,
+                color=colors[i], label="Raw samples", rasterized=True, zorder=3)
+        try:
+            (xc, yc), a, b, theta = fit_ellipse_parameters(x, y)
+            ct, st = np.cos(theta), np.sin(theta)
+            ellipse_x = xc + a * np.cos(phase) * ct - b * np.sin(phase) * st
+            ellipse_y = yc + a * np.cos(phase) * st + b * np.sin(phase) * ct
+            ax.plot(ellipse_x, ellipse_y, "--", color="black", linewidth=1.2,
+                    label="Fitted ellipse")
+        except (ValueError, IndexError, np.linalg.LinAlgError) as exc:
+            ax.text(0.03, 0.97, f"Fit unavailable:\n{exc}", transform=ax.transAxes,
+                    va="top", fontsize=8, wrap=True)
+        ax.set(title=body.name, xlabel="Barycentric x [AU]", ylabel="Barycentric y [AU]")
+        ax.set_aspect("equal", adjustable="box")
+        ax.grid(True, alpha=0.25)
+        ax.legend(fontsize=8, markerscale=3)
+    fig.suptitle(
+        f"Planet samples and ellipse fits — {result['t'][-1] / DAY:g} days\n"
+        "Short orbital arcs may poorly constrain the full ellipse."
+    )
     plt.show()
     return fig
 
@@ -284,6 +351,7 @@ def main():
         print(final_states)
     # plot_points(result)
     plot_ellipses(result)
+    fitplot(result)
     return result
 
 
