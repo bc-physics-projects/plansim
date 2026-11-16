@@ -1,26 +1,21 @@
-"""Planar example with the Sun, eight planets, and six most massive moons.
-
-Units: metres, seconds, radians; mu = GM in m^3/s^2 (do not multiply by G).
-"Largest" means most massive, including the Sun. Initial orbits are circular
-approximations with synthetic phases, not an ephemeris for a particular date.
-All inclinations and eccentricities are ignored. Radius means orbital distance,
-not the body's physical radius. Moons inherit their parent's position/velocity.
-
-Sources (GM values are individual bodies, not planet-plus-moon systems):
-https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/gm_de440.tpc
-https://ssd.jpl.nasa.gov/planets/approx_pos.html  (orbital scales)
-https://ssd.jpl.nasa.gov/sats/elem/  (moon orbital scales)
-
-Usage after rebuilding/installing plansim:
-    python solar_system_15.py --days 30
-    python solar_system_15.py --days 30 --tspace 60
-    python solar_system_15.py --initial-only
-"""
+# %% Imports
 
 import argparse
 import time
 from dataclasses import dataclass
-from math import atan2, cos, fsum, hypot, isfinite, radians, sin, sqrt
+from math import cos, fsum, isfinite, radians, sin, sqrt
+
+import matplotlib.pyplot as plt
+import polars as pl
+
+import plansim
+
+if not hasattr(plansim, "OrbitalSolver15"):
+    raise SystemExit(
+        "Rebuild/install the local plansim extension with OrbitalSolver15 enabled."
+    )
+
+# %% Synthetic initial conditions
 
 AU = 149_597_870_700.0
 DAY = 86_400.0
@@ -55,12 +50,7 @@ BODIES = (
 )
 
 
-def initial_conditions():
-    """Return solver arrays and radial speeds in the model's barycentric frame.
-
-    vs is TOTAL speed; v_angs is the velocity direction from +x, as required by
-    the Rust solver. radial_vs = dr/dt, positive outward, is separate.
-    """
+def synthetic_initial_conditions():
     states = {}
     by_name = {body.name: body for body in BODIES}
     for body in BODIES:
@@ -84,18 +74,65 @@ def initial_conditions():
         fsum(body.mu * states[body.name][k] for body in BODIES) / total_mu
         for k in range(4)
     ]
-    rs, r_angs, vs, v_angs, radial_vs = [], [], [], [], []
+    xs, ys, zs, vxs, vys, vzs = [], [], [], [], [], []
     for body in BODIES:
         x, y, vx, vy = (
             value - offset for value, offset in zip(states[body.name], centre)
         )
-        radius = hypot(x, y)
-        rs.append(radius)
-        r_angs.append(atan2(y, x))
-        vs.append(hypot(vx, vy))
-        v_angs.append(atan2(vy, vx))
-        radial_vs.append((x * vx + y * vy) / radius if radius else 0.0)
-    return mus, rs, r_angs, vs, v_angs, radial_vs
+        xs.append(x / AU)
+        ys.append(y / AU)
+        zs.append(0.0)
+        vxs.append(vx * DAY / AU)
+        vys.append(vy * DAY / AU)
+        vzs.append(0.0)
+    mus = [mu * DAY**2 / AU**3 for mu in mus]
+    return mus, (xs, ys, zs, vxs, vys, vzs)
+
+
+# %% Initial condition definitions
+
+
+def initial_conditions():
+    """
+    Required output: (mus, (xs, ys, zs, vxs, vys, vzs))
+    Units: mus=>AU^3/day^2, positions=>AU, velocities=>AU/day
+    """
+    return synthetic_initial_conditions()
+
+
+# %% Actual solver and plotting code.
+
+
+def plot_points(result):
+    """Display every sampled position of the Sun, planets, and moons in x/y."""
+
+    fig, ax = plt.subplots(figsize=(10, 8), layout="constrained")
+    colors = plt.get_cmap("tab20").colors
+    for i, body in enumerate(BODIES):
+        state = result[str(i)]
+        x = state.struct.field("x").to_numpy()
+        y = state.struct.field("y").to_numpy()
+        ax.plot(
+            x,
+            y,
+            linestyle="solid",
+            marker=None,
+            markersize=2,
+            color=colors[i],
+            label=body.name,
+            rasterized=True,
+        )
+
+    ax.set(
+        xlabel="Barycentric x [AU]",
+        ylabel="Barycentric y [AU]",
+        title=f"Sun, planet, and moon positions over {result['t'][-1]:g} days",
+    )
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), markerscale=4)
+    plt.show()
+    return fig
 
 
 def main():
@@ -105,7 +142,7 @@ def main():
         "--tspace",
         type=float,
         default=1.0,
-        help="Time between samples in seconds (default: 1)",
+        help="Time between samples in days (default: 1)",
     )
     parser.add_argument(
         "--initial-only", action="store_true", help="Print initial data without solving"
@@ -116,35 +153,33 @@ def main():
     if not isfinite(args.tspace) or args.tspace <= 0:
         parser.error("--tspace must be finite and positive")
 
-    mus, rs, r_angs, vs, v_angs, radial_vs = initial_conditions()
-    print("Synthetic coplanar initial conditions; barycentric radii and velocities.")
-    print(
-        f"{'Body':<10} {'mu [m^3/s^2]':>15} {'r [m]':>15} {'angle [rad]':>12} "
-        f"{'speed [m/s]':>13} {'v angle [rad]':>14} {'dr/dt [m/s]':>13}"
-    )
-    for i, body in enumerate(BODIES):
-        print(
-            f"{body.name:<10} {mus[i]:15.8e} {rs[i]:15.8e} {r_angs[i]:12.6f} "
-            f"{vs[i]:13.6f} {v_angs[i]:14.6f} {radial_vs[i]:13.6f}"
-        )
-    if args.initial_only:
-        return
+    mus, init_data = initial_conditions()
 
-    import py_plansim
-
-    # if not hasattr(plansim, "OrbitalSolver15"):
-    #     raise SystemExit(
-    #         "Rebuild/install the local plansim extension with OrbitalSolver15 enabled."
-    #     )
-    solver = py_plansim.OrbitalSolver(mus)
+    solver = plansim.OrbitalSolver15(mus)
     start = time.perf_counter()
-    result = solver.solve(rs, r_angs, vs, v_angs, (0.0, args.days * DAY), args.tspace)
+    result = solver.solve(*init_data, (0.0, args.days), args.tspace)
     elapsed = time.perf_counter() - start
-    times = result[0]
+    if not isinstance(result, pl.DataFrame):
+        raise SystemExit("Rebuild/install plansim for the Polars DataFrame API.")
+    times = result["t"]
     print(
-        f"Solved {len(BODIES)} bodies: {len(times)} samples, final time {times[-1] / DAY:g} days."
+        f"Solved {len(BODIES)} bodies: {result.height} samples, final time {times[-1]:g} days."
     )
     print(f"Solver call time: {elapsed:.3f} seconds.")
+    # Unpack only the final sample for display; preserve the nested return value.
+    final_states = pl.concat(
+        [
+            result[str(i)]
+            .tail(1)
+            .struct.unnest()
+            .with_columns(pl.lit(i).alias("mass #"), pl.lit(body.name).alias("body"))
+            for i, body in enumerate(BODIES)
+        ]
+    ).select("mass #", "body", "x", "y", "z", "vx", "vy", "vz")
+    print("Final barycentric states (positions in m, velocities in m/s):")
+    with pl.Config(tbl_rows=len(BODIES), tbl_cols=8, tbl_formatting="ASCII_FULL"):
+        print(final_states)
+    plot_points(result)
     return result
 
 

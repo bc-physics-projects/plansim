@@ -10,13 +10,19 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = ["polars>=1.0", "numpy>=1.24", "matplotlib>=3.7", "lsq-ellipse>=2.2.1"]
+dependencies = [
+    "polars>=1.0",
+    "numpy>=1.24",
+    "matplotlib>=3.7",
+    "lsq-ellipse>=2.2.1",
+]
 dynamic = ["version"]
 
-[tool.maturin]
-profile = "release"
-pgo-command = "python benchmark_solar_system_15.py --repeats 3 --warmups 1"
-include = [
-    { path = "benchmark_solar_system_15.py", format = "sdist" },
-    { path = "solar_system_15.py", format = "sdist" },
-]
+# TODO: fix the pgo
+# [tool.maturin]
+# profile = "release"
+# pgo-command = "python benchmark_solar_system_15.py --repeats 3 --warmups 1"
+# include = [
+#     { path = "benchmark_solar_system_15.py", format = "sdist" },
+#     { path = "solar_system_15.py", format = "sdist" },
+# ]

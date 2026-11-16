@@ -17,6 +17,10 @@ differential-equations = { version = "0.7.0", features = [
 nalgebra = "0.35.0"
 paste = "1.0.15"
 pyo3 = "0.29.0"
+polars = { version = "0.55.2", default-features = false, features = [
+    "dtype-struct",
+] }
+pyo3-polars = { version = "0.28.0", features = ["dtype-struct"] }
 seq-macro = "0.3.6"
 
 [profile.release]
@@ -31,3 +35,10 @@ opt-level = 3
 inherits = "release"
 debug = 1
 strip = false
+
+[profile.dev]
+codegen-units = 256
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 2

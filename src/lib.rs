@@ -1,8 +1,9 @@
 use differential_equations::prelude::*;
 use nalgebra::DVector;
 use paste::paste;
+use polars::prelude::*;
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict};
+use pyo3_polars::PyDataFrame;
 use seq_macro::seq;
 mod system;
 
@@ -27,20 +28,22 @@ macro_rules! define_solvers {
                 /// Return a Polars DataFrame with time column `t` and zero-based body
                 /// columns `"0"`, `"1"`, ... containing x/y/z/vx/vy/vz Struct fields.
                 /// Access a component with df["0"].struct.field("x").
-                #[allow(clippy::too_many_arguments)] // Preserve the public Python API.
+                #[allow(clippy::too_many_arguments)]
                 pub fn solve(
                         &mut self,
                         py: Python<'_>,
-                        rs: [f64; N],
-                        r_angs: [f64; N],
-                        vs: [f64; N],
-                        v_angs: [f64; N],
+                        xs: [f64; N],
+                        ys: [f64; N],
+                        zs: [f64; N],
+                        vxs: [f64; N],
+                        vys: [f64; N],
+                        vzs: [f64; N],
                         tspan: (f64, f64),
                         tspace: f64,
-                    ) -> PyResult<Py<PyAny>> {
-                        let (tpoints, data) = py.detach(|| self.inner.solve(rs, r_angs, vs, v_angs, tspan, tspace))
-                            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
-                        results_dataframe::<N>(py, tpoints, data)
+                    ) -> PyResult<PyDataFrame> {
+                        py.detach(|| self.inner.solve(xs, ys, zs, vxs, vys, vzs, tspan, tspace))
+                            .map(PyDataFrame)
+                            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
                     }
             }
         }
@@ -82,13 +85,15 @@ impl<const N: usize> GenericSolver<N> {
 
     pub fn solve(
         &mut self,
-        rs: [f64; N],
-        r_angs: [f64; N],
-        vs: [f64; N],
-        v_angs: [f64; N],
+        xs: [f64; N],
+        ys: [f64; N],
+        zs: [f64; N],
+        vxs: [f64; N],
+        vys: [f64; N],
+        vzs: [f64; N],
         tspan: (f64, f64),
         tspace: f64,
-    ) -> anyhow::Result<(Vec<f64>, Vec<DVector<f64>>)> {
+    ) -> anyhow::Result<DataFrame> {
         anyhow::ensure!(
             tspace.is_finite() && tspace > 0.0,
             "tspace must be finite and positive"
@@ -100,14 +105,8 @@ impl<const N: usize> GenericSolver<N> {
         let mut accum_vec = vec![0.0; N * 6];
         for i in 0..N {
             let base = i * 6;
-            let (rsin, rcos) = r_angs[i].sin_cos();
-            let (vsin, vcos) = v_angs[i].sin_cos();
-            accum_vec[base] = rs[i] * rcos;
-            accum_vec[base + 1] = rs[i] * rsin;
-            accum_vec[base + 2] = 0.0;
-            accum_vec[base + 3] = vs[i] * vcos;
-            accum_vec[base + 4] = vs[i] * vsin;
-            accum_vec[base + 5] = 0.0;
+            accum_vec[base..base + 6]
+                .copy_from_slice(&[xs[i], ys[i], zs[i], vxs[i], vys[i], vzs[i]]);
         }
         let y0 = DVector::from_vec(accum_vec);
 
@@ -120,43 +119,27 @@ impl<const N: usize> GenericSolver<N> {
             .method(stepper)
             .even(tspace)
             .solve()?;
-        Ok((solution.t, solution.y))
-    }
-}
-
-/// One row per time sample, with a Struct column per zero-based body number.
-fn results_dataframe<const N: usize>(
-    py: Python<'_>,
-    times: Vec<f64>,
-    data: Vec<DVector<f64>>,
-) -> PyResult<Py<PyAny>> {
-    let polars = py.import("polars")?;
-    let dataframe = polars.getattr("DataFrame")?;
-    let series = polars.getattr("Series")?;
-    let frombuffer = py.import("numpy")?.getattr("frombuffer")?;
-    let kwargs = PyDict::new(py);
-    kwargs.set_item("dtype", polars.getattr("Float64")?)?;
-    let columns = PyDict::new(py);
-    columns.set_item("t", series.call(("t", times), Some(&kwargs))?)?;
-    for body in 0..N {
-        let fields = PyDict::new(py);
-        for (component, name) in ["x", "y", "z", "vx", "vy", "vz"].iter().enumerate() {
-            // Write directly into a Python-owned buffer: no per-sample Python floats.
-            // NumPy retains the bytes owner; Polars retains/copies the array as needed.
-            let bytes = PyBytes::new_with(py, data.len() * 8, |buffer| {
-                for (row, chunk) in data.iter().zip(buffer.as_chunks_mut::<8>().0) {
-                    chunk.copy_from_slice(&row[body * 6 + component].to_ne_bytes());
-                }
-                Ok(())
-            })?;
-            let values = frombuffer.call1((bytes, "float64"))?;
-            fields.set_item(*name, series.call((*name, values), Some(&kwargs))?)?;
+        let frame = solution.to_polars()?;
+        let mut columns = vec![frame.column("t")?.clone()];
+        for body in 0..N {
+            let fields = ["x", "y", "z", "vx", "vy", "vz"]
+                .iter()
+                .enumerate()
+                .map(|(component, name)| {
+                    let mut field = frame
+                        .column(&format!("y{}", body * 6 + component))?
+                        .as_materialized_series()
+                        .clone();
+                    field.rename((*name).into());
+                    Ok(field)
+                })
+                .collect::<PolarsResult<Vec<_>>>()?;
+            columns.push(
+                StructChunked::from_series(body.to_string().into(), frame.height(), fields.iter())?
+                    .into_series()
+                    .into(),
+            );
         }
-        let name = body.to_string();
-        let body_column = dataframe
-            .call1((fields,))?
-            .call_method1("to_struct", (&name,))?;
-        columns.set_item(name, body_column)?;
+        Ok(DataFrame::new(frame.height(), columns)?)
     }
-    Ok(dataframe.call1((columns,))?.unbind())
 }

@@ -13,11 +13,12 @@ import statistics
 import time
 from pathlib import Path
 
-import plansim
 import polars as pl
 
+import plansim
+
 # Share the original example's exact physical constants and initial conditions.
-from solar_system_15 import BODIES, DAY, initial_conditions
+from plansim.synthetic_solar_system_15 import BODIES, DAY, initial_conditions
 
 
 def benchmark(days=1.0, repeats=5, warmups=1):
@@ -29,7 +30,9 @@ def benchmark(days=1.0, repeats=5, warmups=1):
         for iteration in range(warmups + repeats):
             gc.collect()
             start = time.perf_counter()
-            frame = solver.solve(rs, angles, vs, velocity_angles, (0.0, days * DAY), spacing)
+            frame = solver.solve(
+                rs, angles, vs, velocity_angles, (0.0, days * DAY), spacing
+            )
             elapsed = time.perf_counter() - start
             assert isinstance(frame, pl.DataFrame)
             assert frame.columns == ["t"] + [str(i) for i in range(len(BODIES))]
@@ -44,15 +47,27 @@ def benchmark(days=1.0, repeats=5, warmups=1):
             del frame  # Never retain multiple large outputs between trials.
             if iteration >= warmups:
                 timings.append(elapsed)
-        result = dict(tspace_seconds=spacing, days=days, rows=rows,
-                      output_bytes=size, seconds=timings,
-                      median_seconds=statistics.median(timings),
-                      min_seconds=min(timings))
+        result = dict(
+            tspace_seconds=spacing,
+            days=days,
+            rows=rows,
+            output_bytes=size,
+            seconds=timings,
+            median_seconds=statistics.median(timings),
+            min_seconds=min(timings),
+        )
         results.append(result)
-        print(f"spacing={spacing:g}s rows={rows:,} median={result['median_seconds']:.6f}s "
-              f"min={result['min_seconds']:.6f}s", flush=True)
-    return dict(python=platform.python_version(), platform=platform.platform(),
-                extension=plansim.__file__, results=results)
+        print(
+            f"spacing={spacing:g}s rows={rows:,} median={result['median_seconds']:.6f}s "
+            f"min={result['min_seconds']:.6f}s",
+            flush=True,
+        )
+    return dict(
+        python=platform.python_version(),
+        platform=platform.platform(),
+        extension=plansim.__file__,
+        results=results,
+    )
 
 
 def main():
