@@ -133,6 +133,7 @@ def plot_points(result):
     cy /= fsum(body.mu for body in BODIES)
 
     print(cx.max(), cx.min(), cy.max(), cy.min())
+    print(cx[0], cy[0], cx[-1], cy[-1])
 
     fig, ax = plt.subplots(figsize=(10, 8), layout="constrained")
     colors = plt.get_cmap("tab20").colors
@@ -261,19 +262,43 @@ def fitplot(result):
         state = result[str(i)]
         x = state.struct.field("x").to_numpy() / AU
         y = state.struct.field("y").to_numpy() / AU
-        ax.plot(x, y, linestyle="None", marker=".", markersize=3,
-                color=colors[i], label="Raw samples", rasterized=True, zorder=3)
+        ax.plot(
+            x,
+            y,
+            linestyle="None",
+            marker=".",
+            markersize=3,
+            color=colors[i],
+            label="Raw samples",
+            rasterized=True,
+            zorder=3,
+        )
         try:
             (xc, yc), a, b, theta = fit_ellipse_parameters(x, y)
             ct, st = np.cos(theta), np.sin(theta)
             ellipse_x = xc + a * np.cos(phase) * ct - b * np.sin(phase) * st
             ellipse_y = yc + a * np.cos(phase) * st + b * np.sin(phase) * ct
-            ax.plot(ellipse_x, ellipse_y, "--", color="black", linewidth=1.2,
-                    label="Fitted ellipse")
+            ax.plot(
+                ellipse_x,
+                ellipse_y,
+                "--",
+                color="black",
+                linewidth=1.2,
+                label="Fitted ellipse",
+            )
         except (ValueError, IndexError, np.linalg.LinAlgError) as exc:
-            ax.text(0.03, 0.97, f"Fit unavailable:\n{exc}", transform=ax.transAxes,
-                    va="top", fontsize=8, wrap=True)
-        ax.set(title=body.name, xlabel="Barycentric x [AU]", ylabel="Barycentric y [AU]")
+            ax.text(
+                0.03,
+                0.97,
+                f"Fit unavailable:\n{exc}",
+                transform=ax.transAxes,
+                va="top",
+                fontsize=8,
+                wrap=True,
+            )
+        ax.set(
+            title=body.name, xlabel="Barycentric x [AU]", ylabel="Barycentric y [AU]"
+        )
         ax.set_aspect("equal", adjustable="box")
         ax.grid(True, alpha=0.25)
         ax.legend(fontsize=8, markerscale=3)
@@ -349,8 +374,8 @@ def main():
     print("Final barycentric states (positions in m, velocities in m/s):")
     with pl.Config(tbl_rows=len(BODIES), tbl_cols=8, tbl_formatting="ASCII_FULL"):
         print(final_states)
-    # plot_points(result)
-    plot_ellipses(result)
+    plot_points(result)
+    # plot_ellipses(result)
     fitplot(result)
     return result
 

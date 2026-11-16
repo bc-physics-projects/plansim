@@ -54,12 +54,6 @@ macro_rules! define_solvers {
             use pyo3::prelude::*;
             use seq_macro::seq;
 
-            /// Formats the sum of two numbers as string.
-            #[pyfunction]
-            fn sum_as_string(a: usize, b: usize) -> PyResult<String> {
-                Ok((a + b).to_string())
-            }
-
             #[pymodule_init]
             fn init(m: &Bound<'_, PyModule>) -> PyResult<()> {
                 $(seq!(N in $min..=$max {
