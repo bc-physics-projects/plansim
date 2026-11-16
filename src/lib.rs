@@ -5,23 +5,45 @@ use polars::prelude::*;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 use seq_macro::seq;
+use std::sync::{OnceLock, atomic::AtomicBool};
 mod system;
+
+static CTRL_C_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
+static HANDLE_EXIT: AtomicBool = AtomicBool::new(false);
+
+fn install_ctrlc_handler() -> PyResult<()> {
+    let result = CTRL_C_HANDLER.get_or_init(|| {
+        ctrlc::set_handler(move || {
+            if HANDLE_EXIT.load(std::sync::atomic::Ordering::SeqCst) {
+                std::process::exit(130);
+            }
+        })
+        .map_err(|e| e.to_string())
+    });
+
+    match result {
+        Ok(()) => Ok(()),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.clone())),
+    }
+}
 
 macro_rules! define_solvers {
     ($(($min:literal, $max:literal)),+ $(,)?) => {
         $(
         seq!(N in $min..=$max {
             paste! {
-            #[pyclass]
+            #[pyclass(unsendable)]
             pub struct [<OrbitalSolver N>] {
                 inner: GenericSolver<N>,
             }
             #[pymethods]
             impl [<OrbitalSolver N>] {
                 #[new]
-                pub fn new(masses: [f64; N]) -> Self {
+                #[pyo3(signature = (masses, *, kill_sigint=false))]
+                pub fn new(masses: [f64; N], kill_sigint: bool) -> Self {
+                    HANDLE_EXIT.store(kill_sigint, std::sync::atomic::Ordering::SeqCst);
                     Self {
-                        inner: GenericSolver::<N>::new(masses),
+                    inner: GenericSolver::<N>::new(masses),
                     }
                 }
 
@@ -59,6 +81,7 @@ macro_rules! define_solvers {
 
             #[pymodule_init]
             fn init(m: &Bound<'_, PyModule>) -> PyResult<()> {
+                crate::install_ctrlc_handler()?;
                 $(seq!(N in $min..=$max {
                     paste! {
                         m.add_class::<super::[<OrbitalSolver N>]>()?;
