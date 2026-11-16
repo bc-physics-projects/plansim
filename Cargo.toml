@@ -1,6 +1,6 @@
 [package]
 name = "plansim"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -22,6 +22,7 @@ polars = { version = "0.55.2", default-features = false, features = [
 ] }
 pyo3-polars = { version = "0.28.0", features = ["dtype-struct"] }
 seq-macro = "0.3.6"
+ctrlc = "3.5.2"
 
 [profile.release]
 panic = "abort"

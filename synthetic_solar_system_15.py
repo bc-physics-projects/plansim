@@ -155,7 +155,7 @@ def main():
 
     mus, init_data = initial_conditions()
 
-    solver = plansim.OrbitalSolver15(mus)
+    solver = plansim.OrbitalSolver15(mus, kill_sigint=True)
     start = time.perf_counter()
     result = solver.solve(*init_data, (0.0, args.days), args.tspace)
     elapsed = time.perf_counter() - start
