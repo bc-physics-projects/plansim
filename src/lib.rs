@@ -39,11 +39,11 @@ macro_rules! define_solvers {
             #[pymethods]
             impl [<OrbitalSolver N>] {
                 #[new]
-                #[pyo3(signature = (masses, *, kill_sigint=false))]
-                pub fn new(masses: [f64; N], kill_sigint: bool) -> Self {
+                #[pyo3(signature = (masses, *, kill_sigint=false, max_steps=None, abs_tol=None, rel_tol=None))]
+                pub fn new(masses: [f64; N], kill_sigint: bool, max_steps: Option<usize>, abs_tol: Option<f64>, rel_tol: Option<f64>) -> Self {
                     HANDLE_EXIT.store(kill_sigint, std::sync::atomic::Ordering::SeqCst);
                     Self {
-                    inner: GenericSolver::<N>::new(masses),
+                    inner: GenericSolver::<N>::new(masses, max_steps, abs_tol, rel_tol),
                     }
                 }
 
@@ -97,12 +97,23 @@ define_solvers!((15, 15), (90, 100));
 
 struct GenericSolver<const N: usize> {
     data: system::NBodies<N>,
+    max_steps: Option<usize>,
+    abs_tol: Option<f64>,
+    rel_tol: Option<f64>,
 }
 
 impl<const N: usize> GenericSolver<N> {
-    pub fn new(mus: [f64; N]) -> Self {
+    pub fn new(
+        mus: [f64; N],
+        max_steps: Option<usize>,
+        abs_tol: Option<f64>,
+        rel_tol: Option<f64>,
+    ) -> Self {
         Self {
             data: system::NBodies { mus },
+            max_steps,
+            abs_tol,
+            rel_tol,
         }
     }
 
@@ -133,10 +144,14 @@ impl<const N: usize> GenericSolver<N> {
         }
         let y0 = DVector::from_vec(accum_vec);
 
+        let duration = tspan.1 - tspan.0;
         let stepper = ExplicitRungeKutta::dop853()
-            .rtol(1e-8)
-            .atol(1e-6)
-            .max_steps(usize::MAX);
+            .rtol(self.rel_tol.unwrap_or(1e-10))
+            .atol(self.abs_tol.unwrap_or(1e-12))
+            .max_steps(
+                self.max_steps
+                    .unwrap_or((10_000.0 + 1_000.0 * duration).ceil() as usize),
+            );
         let system = system::NBodies::<N> { mus: self.data.mus };
         let solution = IVP::ode(&system, tspan.0, tspan.1, y0)
             .method(stepper)
