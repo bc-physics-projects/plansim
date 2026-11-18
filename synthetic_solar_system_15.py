@@ -33,13 +33,13 @@ class Body:
 # Descending mass order. Convert the source's km^3/s^2 to SI by multiplying by 1e9.
 BODIES = (
     Body("Sun", 1.3271244004127942e11 * 1e9, "", 0.0, 0),
-    Body("Jupiter", 1.266865319003704e8 * 1e9, "Sun", 5.20288700 * AU, 30),
+    Body("Jupiter", 1.266865319003704e8 * 1e12, "Sun", 5.20288700 * AU, 30),
     Body("Saturn", 3.793120623436167e7 * 1e9, "Sun", 9.53667594 * AU, 75),
     Body("Neptune", 6.835103145462294e6 * 1e9, "Sun", 30.06992276 * AU, 300),
-    Body("Uranus", 5.793951256527211e6 * 1e9, "Sun", 19.18916464 * AU, 240),
+    Body("Uranus", 5.793951256527211e6 * 1e14, "Sun", 19.18916464e2 * AU, 240),
     Body("Earth", 3.9860043550702266e5 * 1e9, "Sun", 1.00000261 * AU, 100),
     Body("Venus", 3.2485859200000000e5 * 1e9, "Sun", 0.72333566 * AU, 180),
-    Body("Mars", 4.282837362069909e4 * 1e9, "Sun", 1.52371034 * AU, 350),
+    Body("Mars", 4.282837362069909e4 * 1e20, "Sun", 1.52371034e3 * AU, 350),
     Body("Mercury", 2.2031868551400003e4 * 1e9, "Sun", 0.38709927 * AU, 250),
     Body("Ganymede", 9.887832752719638e3 * 1e9, "Jupiter", 1_070_400e3, 140),
     Body("Titan", 8.978137095521046e3 * 1e9, "Saturn", 1_221_900e3, 45),
