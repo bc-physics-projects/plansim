@@ -6,8 +6,10 @@ pub struct NBodies<const N: usize> {
     pub mus: [f64; N],
 }
 
-impl<const N: usize> ODE<f64, DVector<f64>> for NBodies<N> {
-    fn diff(&self, _t: f64, y: &DVector<f64>, dydt: &mut DVector<f64>) {
+pub type State<const N: usize> = DVector<f64>;
+
+impl<const N: usize> ODE<f64, State<N>> for NBodies<N> {
+    fn diff(&self, _t: f64, y: &State<N>, dydt: &mut State<N>) {
         let y = y.as_slice();
         let dydt = dydt.as_mut_slice();
         // SoA: x, y, z, vx, vy, vz, each with N contiguous values.
