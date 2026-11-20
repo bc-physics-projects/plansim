@@ -9,6 +9,7 @@ pub struct NBodies<const N: usize> {
 pub type State<const N: usize> = SVector<f64, { 6 * N }>;
 
 impl<const N: usize> ODE<f64, State<N>> for NBodies<N> {
+    #[inline(always)]
     fn diff(&self, _t: f64, y: &State<N>, dydt: &mut State<N>) {
         let y = y.as_slice();
         let dydt = dydt.as_mut_slice();
