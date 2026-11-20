@@ -72,63 +72,6 @@ impl<const N: usize> ODE<f64, State<N>> for NBodies<N> {
     }
 }
 
-#[cfg(feature = "rectangular-kernel")]
-impl<const N: usize> ODE<f64, State<N>> for NBodies<N> {
-    fn diff(&self, _t: f64, y: &State<N>, dydt: &mut State<N>) {
-        let y = y.as_slice();
-        let dydt = dydt.as_mut_slice();
-        // SoA: x, y, z, vx, vy, vz, each with N contiguous values.
-        let (positions, velocities) = y.split_at(3 * N);
-        let (rates, accelerations) = dydt.split_at_mut(3 * N);
-        rates.copy_from_slice(velocities);
-        let (xs, rest) = positions.split_at(N);
-        let (ys, zs) = rest.split_at(N);
-        let (axs, rest) = accelerations.split_at_mut(N);
-        let (ays, azs) = rest.split_at_mut(N);
-        // Each row accumulates independently in SIMD registers. Mask the self
-        // lane before division so its zero separation never produces NaN.
-        use std::simd::{Mask, Select, StdFloat, f64x4, num::SimdFloat};
-        for i in 0..N {
-            let mut ax = f64x4::splat(0.0);
-            let mut ay = f64x4::splat(0.0);
-            let mut az = f64x4::splat(0.0);
-            let mut j = 0;
-            while j + 4 <= N {
-                let dx = f64x4::from_slice(&xs[j..]) - f64x4::splat(xs[i]);
-                let dy = f64x4::from_slice(&ys[j..]) - f64x4::splat(ys[i]);
-                let dz = f64x4::from_slice(&zs[j..]) - f64x4::splat(zs[i]);
-                let active = Mask::<i64, 4>::from_array(std::array::from_fn(|lane| j + lane != i));
-                let r2 = active.select(dx * dx + dy * dy + dz * dz, f64x4::splat(1.0));
-                let mu = active.select(f64x4::from_slice(&self.mus[j..]), f64x4::splat(0.0));
-                let force = mu / (r2 * r2.sqrt());
-                ax += dx * force;
-                ay += dy * force;
-                az += dz * force;
-                j += 4;
-            }
-            let mut ax_i = ax.reduce_sum();
-            let mut ay_i = ay.reduce_sum();
-            let mut az_i = az.reduce_sum();
-            for j in j..N {
-                if i == j {
-                    continue;
-                }
-                let dx = xs[j] - xs[i];
-                let dy = ys[j] - ys[i];
-                let dz = zs[j] - zs[i];
-                let r2 = dx * dx + dy * dy + dz * dz;
-                let force = self.mus[j] / (r2 * r2.sqrt());
-                ax_i += dx * force;
-                ay_i += dy * force;
-                az_i += dz * force;
-            }
-            axs[i] = ax_i;
-            ays[i] = ay_i;
-            azs[i] = az_i;
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
