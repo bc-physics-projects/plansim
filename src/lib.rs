@@ -1,3 +1,5 @@
+#![feature(portable_simd)]
+
 use differential_equations::prelude::*;
 use nalgebra::DVector;
 use paste::paste;
@@ -7,6 +9,7 @@ use pyo3_polars::PyDataFrame;
 use seq_macro::seq;
 use std::sync::{OnceLock, atomic::AtomicBool};
 mod system;
+
 
 static CTRL_C_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
 static HANDLE_EXIT: AtomicBool = AtomicBool::new(false);
@@ -137,10 +140,8 @@ impl<const N: usize> GenericSolver<N> {
             "tspan must contain finite, increasing times"
         );
         let mut accum_vec = vec![0.0; N * 6];
-        for i in 0..N {
-            let base = i * 6;
-            accum_vec[base..base + 6]
-                .copy_from_slice(&[xs[i], ys[i], zs[i], vxs[i], vys[i], vzs[i]]);
+        for (component, values) in [xs, ys, zs, vxs, vys, vzs].iter().enumerate() {
+            accum_vec[component * N..(component + 1) * N].copy_from_slice(values);
         }
         let y0 = DVector::from_vec(accum_vec);
 
@@ -165,7 +166,7 @@ impl<const N: usize> GenericSolver<N> {
                 .enumerate()
                 .map(|(component, name)| {
                     let mut field = frame
-                        .column(&format!("y{}", body * 6 + component))?
+                        .column(&format!("y{}", component * N + body))?
                         .as_materialized_series()
                         .clone();
                     field.rename((*name).into());

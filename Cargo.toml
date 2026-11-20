@@ -31,6 +31,9 @@ codegen-units = 1
 strip = true
 opt-level = 3
 
+[features]
+release-opt = ["polars/performant"]
+
 # Keep symbols when investigating native CPU profiles.
 [profile.profiling]
 inherits = "release"
@@ -42,3 +45,12 @@ codegen-units = 256
 debug = "line-tables-only"
 opt-level = 0
 lto = false
+split-debuginfo = "packed"
+incremental = false
+
+[profile.dev.package."*"]
+debug = 0     # Never generate debug symbols for Polars
+opt-level = 1 # Keeps Polars fast in dev without slow release LTO
+
+[patch.crates-io]
+differential-equations = { git = "https://github.com/bc-physics-projects/differential-equations/", rev = "38b230834d61c1bbb0e0b415572a73be532e3e5f" }

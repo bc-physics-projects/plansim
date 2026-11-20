@@ -11,14 +11,15 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-    "polars>=1.0",
-    "numpy>=1.24",
-    "matplotlib>=3.7",
-    "lsq-ellipse>=2.2.1",
+    "polars~=2.1.0",
+    "numpy~=2.5.5",
+    "matplotlib~=3.10.8",
+    "astroquery~=0.4.11",
+    "astropy~=8.0.3",
 ]
 dynamic = ["version"]
 
 [tool.maturin]
-profile = "release"
+profile = "dev"                                                         # Explicitly add --release for optimizations
 pgo-command = "python horizons_solar_system_15.py --days 365 --no-plot"
 include = [{ path = "horizons_solar_system_15.py", format = "sdist" }]

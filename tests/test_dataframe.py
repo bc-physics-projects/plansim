@@ -10,13 +10,16 @@ from plansim.synthetic_solar_system_15 import DAY, initial_conditions
 
 class DataFrameResultsTests(unittest.TestCase):
     def test_solar_daily_and_second_sampling_agree(self):
-        mus, rs, angles, vs, velocity_angles, _ = initial_conditions()
+        mus, states = initial_conditions()
         solver = plansim.OrbitalSolver15(mus)
-        daily = solver.solve(rs, angles, vs, velocity_angles, (0.0, DAY), DAY)
-        seconds = solver.solve(rs, angles, vs, velocity_angles, (0.0, DAY), 1.0)
+        daily = solver.solve(*states, (0.0, 1.0), 1.0)
+        seconds = solver.solve(*states, (0.0, 1.0), 1.0 / DAY)
         self.assertEqual(daily.height, 2)
-        self.assertEqual(seconds.height, 86401)
-        self.assertEqual(seconds["t"].diff().drop_nulls().unique().to_list(), [1.0])
+        # Repeated fractional-day steps may leave a tiny final interval;
+        # the integrator then appends the exact endpoint as one extra row.
+        self.assertIn(seconds.height, (86401, 86402))
+        self.assertAlmostEqual(seconds["t"][-1], 1.0)
+        self.assertAlmostEqual(seconds["t"][1], 1.0 / DAY)
         for body in range(15):
             for field in ("x", "y", "z", "vx", "vy", "vz"):
                 a = daily[str(body)].struct.field(field)
@@ -27,7 +30,7 @@ class DataFrameResultsTests(unittest.TestCase):
 
     def test_invalid_time_arguments(self):
         solver = plansim.OrbitalSolver15([0.0] * 15)
-        arrays = ([float(i + 1) for i in range(15)], [0.0] * 15, [0.0] * 15, [0.0] * 15)
+        arrays = ([float(i + 1) for i in range(15)],) + ([0.0] * 15,) * 5
         for span, spacing in (
             ((0.0, 1.0), 0.0),
             ((1.0, 0.0), 1.0),
@@ -45,9 +48,11 @@ class DataFrameResultsTests(unittest.TestCase):
                 solver = getattr(plansim, f"OrbitalSolver{count}")([0.0] * count)
                 result = solver.solve(
                     [float(i + 1) for i in range(count)],
-                    [0.0] * count,
+                    [3.0] * count,
+                    [5.0] * count,
                     [2.0] * count,
-                    [0.0] * count,
+                    [-4.0] * count,
+                    [6.0] * count,
                     (0.0, 1.0),
                     0.25,
                 )
@@ -67,9 +72,14 @@ class DataFrameResultsTests(unittest.TestCase):
                     self.assertEqual(
                         state.struct.field("vx").to_list(), [2.0] * result.height
                     )
-                    for field in ("y", "z", "vy", "vz"):
+                    for field, initial, velocity in (
+                        ("y", 3.0, -4.0), ("z", 5.0, 6.0)
+                    ):
+                        for t, value in zip(result["t"], state.struct.field(field)):
+                            self.assertAlmostEqual(value, initial + velocity * t)
+                    for field, velocity in (("vy", -4.0), ("vz", 6.0)):
                         self.assertEqual(
-                            state.struct.field(field).to_list(), [0.0] * result.height
+                            state.struct.field(field).to_list(), [velocity] * result.height
                         )
         self.assertFalse(hasattr(plansim, "OrbitalSolverResults"))
         self.assertFalse(hasattr(plansim, "OrbitalSolverResults15"))

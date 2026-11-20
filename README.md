@@ -4,7 +4,7 @@ Build and install the Rust extension with `maturin develop --release` in your Py
 environment. Installation also installs the required Python Polars package.
 
 `OrbitalSolver15` and `OrbitalSolver90` through `OrbitalSolver100` expose
-`solve(rs, r_angs, vs, v_angs, tspan, tspace)` and return a `polars.DataFrame`.
+`solve(xs, ys, zs, vxs, vys, vzs, tspan, tspace)` and return a `polars.DataFrame`.
 Each row is one time sample:
 
 - `t`: sample time, Float64.
@@ -14,7 +14,7 @@ Each row is one time sample:
 Polars uses nested Struct columns rather than a pandas-style MultiIndex.
 
 ```python
-df = solver.solve(rs, r_angs, vs, v_angs, (0.0, 100.0), 1.0)
+df = solver.solve(xs, ys, zs, vxs, vys, vzs, (0.0, 100.0), 1.0)
 times = df["t"]
 x0 = df["0"].struct.field("x")
 body0 = df["0"].struct.unnest()  # six-column DataFrame
@@ -27,6 +27,14 @@ methods. Run the integration checks after installation with
 ## Performance and profiling
 
 Release builds optimize for speed (`opt-level = 3`, fat LTO, one codegen unit).
+The integrator stores states as six contiguous component arrays (structure of
+arrays): `[x[0..N], y[0..N], z[0..N], vx[0..N], vy[0..N], vz[0..N]]`.
+The force kernel uses explicit `std::simd::f64x4` batches for every system size,
+with scalar tails for leftover pairs. Each pair shares a distance calculation,
+and contributions are summed in their original order without fast-math.
+This uses the existing nightly toolchain and its `portable_simd` feature.
+The derivative callback does not allocate on the heap.
+Python inputs and per-body DataFrame fields retain their existing layout.
 Gravity evaluates each unordered pair once. Integration releases the Python
 GIL, and output uses NumPy-backed numeric buffers instead of Python float lists.
 The original example remains in `solar_system_15.py`; its benchmark counterpart
