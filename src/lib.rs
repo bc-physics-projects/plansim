@@ -1,7 +1,8 @@
 #![feature(portable_simd)]
+#![feature(generic_const_exprs)]
+#![allow(incomplete_features)]
 
 use differential_equations::prelude::*;
-use nalgebra::DVector;
 use paste::paste;
 use polars::prelude::*;
 use pyo3::prelude::*;
@@ -9,7 +10,6 @@ use pyo3_polars::PyDataFrame;
 use seq_macro::seq;
 use std::sync::{OnceLock, atomic::AtomicBool};
 mod system;
-
 
 static CTRL_C_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
 static HANDLE_EXIT: AtomicBool = AtomicBool::new(false);
@@ -130,7 +130,10 @@ impl<const N: usize> GenericSolver<N> {
         vzs: [f64; N],
         tspan: (f64, f64),
         tspace: f64,
-    ) -> anyhow::Result<DataFrame> {
+    ) -> anyhow::Result<DataFrame>
+    where
+        [(); 6 * N]:,
+    {
         anyhow::ensure!(
             tspace.is_finite() && tspace > 0.0,
             "tspace must be finite and positive"
@@ -143,7 +146,7 @@ impl<const N: usize> GenericSolver<N> {
         for (component, values) in [xs, ys, zs, vxs, vys, vzs].iter().enumerate() {
             accum_vec[component * N..(component + 1) * N].copy_from_slice(values);
         }
-        let y0 = DVector::from_vec(accum_vec);
+        let y0 = system::State::<N>::from_vec(accum_vec);
 
         let duration = tspan.1 - tspan.0;
         let stepper = ExplicitRungeKutta::dop853()
