@@ -1,4 +1,6 @@
 #![feature(portable_simd)]
+#![feature(generic_const_exprs)]
+#![allow(incomplete_features)]
 
 use differential_equations::prelude::*;
 use paste::paste;
@@ -128,7 +130,10 @@ impl<const N: usize> GenericSolver<N> {
         vzs: [f64; N],
         tspan: (f64, f64),
         tspace: f64,
-    ) -> anyhow::Result<DataFrame> {
+    ) -> anyhow::Result<DataFrame>
+    where
+        [(); 6 * N]:,
+    {
         anyhow::ensure!(
             tspace.is_finite() && tspace > 0.0,
             "tspace must be finite and positive"

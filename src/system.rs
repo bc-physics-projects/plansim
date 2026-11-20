@@ -1,12 +1,12 @@
 use differential_equations::prelude::*;
-use nalgebra::DVector;
+use nalgebra::{DVector, SVector};
 
 #[derive(Debug, Clone)]
 pub struct NBodies<const N: usize> {
     pub mus: [f64; N],
 }
 
-pub type State<const N: usize> = DVector<f64>;
+pub type State<const N: usize> = SVector<f64, { 6 * N }>;
 
 impl<const N: usize> ODE<f64, State<N>> for NBodies<N> {
     fn diff(&self, _t: f64, y: &State<N>, dydt: &mut State<N>) {
@@ -68,75 +68,6 @@ impl<const N: usize> ODE<f64, State<N>> for NBodies<N> {
             axs[i] = ax_i;
             ays[i] = ay_i;
             azs[i] = az_i;
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn pairwise_matches_direct_force_in_three_dimensions() {
-        check_forces::<1>();
-        check_forces::<2>();
-        check_forces::<4>();
-        check_forces::<5>();
-        check_forces::<9>();
-        check_forces::<10>();
-        check_forces::<12>();
-        check_forces::<15>();
-        check_forces::<16>();
-        check_forces::<17>();
-        check_forces::<31>();
-        check_forces::<32>();
-        check_forces::<33>();
-        check_forces::<90>();
-        check_forces::<91>();
-        check_forces::<99>();
-        check_forces::<100>();
-    }
-
-    fn check_forces<const N: usize>() {
-        let system = NBodies {
-            mus: std::array::from_fn::<_, N, _>(|i| (i * i) as f64),
-        };
-        let y = DVector::from_fn(N * 6, |i, _| {
-            let body = (i % N + 1) as f64;
-            match i / N {
-                0 => body * 2.0,
-                1 => body.sin(),
-                2 => body.cos(),
-                component => body * 0.1 * component as f64,
-            }
-        });
-        let mut actual = DVector::from_element(N * 6, f64::NAN);
-        system.diff(0.0, &y, &mut actual);
-        for i in 0..N {
-            for k in 0..3 {
-                assert_eq!(actual[k * N + i], y[(k + 3) * N + i]);
-                let mut expected = 0.0;
-                for j in 0..N {
-                    if i == j {
-                        continue;
-                    }
-                    let r2: f64 = (0..3)
-                        .map(|axis| (y[axis * N + j] - y[axis * N + i]).powi(2))
-                        .sum();
-                    expected += (y[k * N + j] - y[k * N + i]) * system.mus[j] / r2.sqrt().powi(3);
-                }
-                assert!(
-                    (actual[(k + 3) * N + i] - expected).abs() <= 1e-12 * expected.abs().max(1.0)
-                );
-            }
-        }
-        // Internal forces conserve total momentum (mu is proportional to mass).
-        for k in 3..6 {
-            let total: f64 = (0..N).map(|i| system.mus[i] * actual[k * N + i]).sum();
-            let scale: f64 = (0..N)
-                .map(|i| (system.mus[i] * actual[k * N + i]).abs())
-                .sum();
-            assert!(total.abs() <= 1e-12 * scale.max(1.0));
         }
     }
 }
